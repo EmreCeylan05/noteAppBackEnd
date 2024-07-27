@@ -12,20 +12,51 @@ app.use(bodyParser.json()); // Middleware
 app.use(cors());
 
 let connection = null;
-rethinkdb.connect({ host: 'localhost', port: 28015, db: 'test' }, (err, conn) => {
+rethinkdb.connect({ host: 'localhost', port: 28015, db: 'test' }, async (err, conn) => {
 	if (err) throw err;
 	connection = conn;
 	console.log('Db connected');
+	await autoInitializeDb();
 });
 
-// Notes endpoints
+const autoInitializeDb = async () => {
+	try {
+		const dbList = await rethinkdb.dbList().run(connection);
+		if (!dbList.includes('test')) {
+			await rethinkdb.dbCreate('test').run(connection);
+		}
+
+		const tableList = await rethinkdb.tableList().run(connection);
+
+		if (!tableList.includes('notes')) {
+			await rethinkdb.tableCreate('notes').run(connection);
+			await rethinkdb.table('notes').indexCreate('title').run(connection);
+			await rethinkdb.table('notes').indexCreate('content').run(connection);
+			await rethinkdb.table('notes').indexCreate('priority').run(connection);
+			await rethinkdb.table('notes').indexCreate('owner').run(connection);
+			await rethinkdb.table('notes').indexCreate('lockStatus').run(connection);
+			await rethinkdb.table('notes').indexCreate('password').run(connection);
+		}
+
+		if (!tableList.includes('users')) {
+			await rethinkdb.tableCreate('users').run(connection);
+			await rethinkdb.table('users').indexCreate('username').run(connection);
+			await rethinkdb.table('users').indexCreate('password').run(connection);
+		}
+
+		console.log('Tables and indexes checked/created');
+	} catch (error) {
+		console.error('Database Creation error:', error);
+	}
+};
+
 app.get('/notes', async (req, res) => {
 	const owner = req.query.owner;
-    if (!owner) {
-        return res.status(400).send('Owner query parameter is missing');
-    }
+	if (!owner) {
+		return res.status(400).send('Owner query parameter is missing');
+	}
 	try {
-		const cursor = await rethinkdb.table('notes').filter(note =>note('owner').match(owner)).orderBy(rethinkdb.desc('priority')).run(connection);
+		const cursor = await rethinkdb.table('notes').filter(note => note('owner').match(owner)).orderBy(rethinkdb.desc('priority')).run(connection);
 		const notes = await cursor.toArray();
 		res.json(notes);
 	} catch (error) {
@@ -35,7 +66,7 @@ app.get('/notes', async (req, res) => {
 });
 
 app.post('/notes', async (req, res) => {
-	const { title, content, priority, lockStatus ,owner ,password} = req.body;
+	const { title, content, priority, lockStatus, owner, password } = req.body;
 	try {
 		const result = await rethinkdb.table('notes').insert({
 			id: uuidv4(),
@@ -56,9 +87,9 @@ app.post('/notes', async (req, res) => {
 
 app.put('/notes/:id', async (req, res) => {
 	const { id } = req.params;
-	const { title, content, priority, lockStatus , password} = req.body;
+	const { title, content, priority, lockStatus, password } = req.body;
 	try {
-		await rethinkdb.table('notes').get(id).update({ title, content, priority, lockStatus  ,password}).run(connection);
+		await rethinkdb.table('notes').get(id).update({ title, content, priority, lockStatus, password }).run(connection);
 		const updatedNote = await rethinkdb.table('notes').get(id).run(connection);
 		res.json(updatedNote);
 	} catch (error) {
@@ -79,7 +110,7 @@ app.delete('/notes/:id', async (req, res) => {
 });
 
 app.get('/search', async (req, res) => {
-	const { query ,owner} = req.query;
+	const { query, owner } = req.query;
 	try {
 		const cursor = await rethinkdb.table('notes')
 			.filter(note =>
@@ -97,7 +128,6 @@ app.get('/search', async (req, res) => {
 	}
 });
 
-// User authentication endpoint
 app.post('/register', async (req, res) => {
 	const { username, password } = req.body;
 	try {
@@ -115,7 +145,6 @@ app.post('/register', async (req, res) => {
 	}
 });
 
-// User login endpoint
 app.post('/login', async (req, res) => {
 	const { username, password } = req.body;
 	try {
